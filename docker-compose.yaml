@@ -1,0 +1,17 @@
+version: '3.6'
+
+services:
+
+  metrics:
+    # image: derkades/metrics
+    build: .
+    user: '1000'
+    ports:
+      - '8080:8080'
+    volumes:
+      - type: bind
+        source: ./config
+        target: /config
+      - type: bind
+        source: ./data
+        target: /data
