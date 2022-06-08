@@ -109,9 +109,11 @@ def submit():
 
         value = request.json['fields'][name]
 
-        if value is None and \
-                ('nullable' not in field['nullable'] or not field['nullable']):
-            return Response(f"Field '{name}' is not nullable but null was given")
+        if value is None:
+            if 'null_value' in field:
+                value = field['null_value']
+            else:
+                return Response(f"Field '{name}' is not nullable but null was given")
 
         correct_type = field['type']
         if correct_type == 'string':
