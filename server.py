@@ -11,13 +11,21 @@ from os import environ as env
 from werkzeug.exceptions import HTTPException
 import sys
 import traceback
+from threading import Thread
+import time
+
 
 DATA_PATH = Path(env['DATA_PATH'] if 'DATA_PATH' in env else '.')
 CONFIG_PATH = Path(env['CONFIG_PATH'] if 'CONFIG_PATH' in env else '.')
 
-db_path = Path(DATA_PATH, 'metrics.db')
-db = sqlite3.connect(db_path,
-                     detect_types=sqlite3.PARSE_DECLTYPES)
+
+def open_db():
+    db_path = Path(DATA_PATH, 'metrics.db')
+    return sqlite3.connect(db_path,
+                           detect_types=sqlite3.PARSE_DECLTYPES)
+
+
+db = open_db()
 
 application = Flask(__name__)
 
@@ -25,9 +33,10 @@ configs = {}
 
 for path in Path(CONFIG_PATH, 'sources').iterdir():
     if not path.name.endswith('.yaml'):
-        print('Skipped config file ', path.name)
+        print('Skipped config file ', path.name, flush=True)
     with path.open() as f:
         configs[path.name[:-5]] = yaml.safe_load(f)
+    print('Loaded source:', path.name, flush=True)
 
 
 @application.route('/show', methods=['GET'])
@@ -64,6 +73,8 @@ def show():
             by_metric[metric_name].append((metric_value, count))
         else:
             by_metric[metric_name] = [(metric_value, count)]
+
+    cur.close()
 
     for metric_name, values in by_metric.items():
         response += "<h3>" + html.escape(metric_name) + "</h3>"
@@ -174,6 +185,7 @@ def submit():
                         DO UPDATE SET metric_value=?
                     ''', insert_data)
 
+    cur.close()
     db.commit()
 
     return Response('ok', 200)
@@ -184,3 +196,29 @@ def handle_exception(e: HTTPException):
     print(e, file=sys.stderr)
     traceback.print_exc()
     return e.get_response()
+
+
+class PurgeExpired(Thread):
+
+    def __init__(self):
+        Thread.__init__(self, daemon=True)
+
+    def run(self):
+        while True:
+            time.sleep(10)
+            with open_db() as db:
+                cur = db.cursor()
+
+                for source, config in configs.items():
+                    print('Pruning expired data for', source, flush=True)
+                    expiry_minutes = config['input']['expire_minutes']
+                    delete_before = datetime.now() - timedelta(minutes=expiry_minutes)
+                    cur.execute('DELETE FROM clients WHERE source = ? and last_update < ?', (source, delete_before))
+                    time.sleep(1)
+
+                cur.close()
+                db.commit()
+
+            time.sleep(300)
+
+PurgeExpired().start();
