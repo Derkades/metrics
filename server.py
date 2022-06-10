@@ -21,8 +21,10 @@ CONFIG_PATH = Path(env['CONFIG_PATH'] if 'CONFIG_PATH' in env else '.')
 
 def open_db():
     db_path = Path(DATA_PATH, 'metrics.db')
-    return sqlite3.connect(db_path,
-                           detect_types=sqlite3.PARSE_DECLTYPES)
+    db = sqlite3.connect(db_path,
+                         detect_types=sqlite3.PARSE_DECLTYPES)
+    db.execute('PRAGMA foreign_keys=ON')
+    return db
 
 
 db = open_db()
@@ -55,7 +57,7 @@ def show():
     cur.execute('SELECT COUNT(*) FROM clients WHERE source=?', (source,))
     (count_clients,) = cur.fetchone()
 
-    response += f'Total unique clients: {count_clients}'
+    response += f'Total active: {count_clients}'
 
     cur.execute('''
                 SELECT metric_name, metric_value, COUNT(*) as value_count
@@ -80,7 +82,7 @@ def show():
         response += "<h3>" + html.escape(metric_name) + "</h3>"
         response += "<ol>"
         for metric_value, count in values:
-            response += f"<li>{html.escape(metric_value)} ({count} times)</li>"
+            response += f"<li>{html.escape(metric_value)} ({count})</li>"
         response += "</ol>"
 
     return response
@@ -116,13 +118,25 @@ def submit():
     for field in conf_inp['fields']:
         name = field['name']
         if name not in request.json['fields']:
-            return Response(f"Missing field '{name}'", 400)
+            # If optional and not present, skip this field
+            if 'optional' in field and field['optional'] is True:
+                continue
+            # If null value is specified, use that and skip this field
+            elif 'null_value' in field:
+                field_values[name] = field['null_value']
+                continue
+            else:
+                return Response(f"Missing field '{name}'", 400)
 
         value = request.json['fields'][name]
 
+        # Same check as above, but this time for null value instead of a non-existing key
         if value is None:
-            if 'null_value' in field:
-                value = field['null_value']
+            if 'optional' in field and field['optional'] is True:
+                continue
+            elif 'null_value' in field:
+                field_values[name] = field['null_value']
+                continue
             else:
                 return Response(f"Field '{name}' is not nullable but null was given")
 
@@ -150,32 +164,37 @@ def submit():
 
     cur = db.cursor()
     cur.execute('''
-                SELECT rowid, last_update
+                SELECT id, last_update
                 FROM clients
                 WHERE uuid=? AND source=?
                 ''', (uuid, source))
     row = cur.fetchone()
     now = datetime.now()
     if row is None:
-        cur.execute('INSERT INTO clients (source, uuid, last_update) VALUES (?, ?, ?)', (source, uuid, now))
-        client_id = cur.lastrowid
+        cur.execute('INSERT INTO clients (source, uuid, last_update) VALUES (?, ?, ?) RETURNING `id`', (source, uuid, now))
+        (client_id,) = cur.fetchone()
+        print(f"Received data for source {source} from id {client_id} address {request.remote_addr} for the first time", flush=True)
     else:
-        client_id, last_update = row
         frequency = conf_inp['frequency_minutes']
-        if now - last_update < timedelta(minutes=frequency*0.9):
+        client_id, last_update = row
+        minutes_ago = int((now - last_update).total_seconds()) / 60
+        if minutes_ago < frequency * 0.9:
+            print(f"Received data for source {source} from id {client_id} address {request.remote_addr}, previously {minutes_ago:.1f} minutes ago (ignored, too quickly)", flush=True)
             return Response(f'Please wait {frequency} minutes in between requests', 429)
         else:
             cur.execute('''
                         UPDATE clients
                         SET last_update=?
-                        WHERE rowid=?
+                        WHERE id=?
                         ''', (now, client_id))
+
+        print(f"Received data for source {source} from id {client_id} address {request.remote_addr}, previously {minutes_ago:.1f} minutes ago", flush=True)
+
+    print(field_values, flush=True)
 
     insert_data = []
 
-    for field in conf_inp['fields']:
-        name = field['name']
-        value = field_values[name]
+    for name, value in field_values.items():
         insert_data.append((client_id, name, value, value))
 
     cur.executemany('''
@@ -221,4 +240,5 @@ class PurgeExpired(Thread):
 
             time.sleep(300)
 
-PurgeExpired().start();
+
+PurgeExpired().start()
