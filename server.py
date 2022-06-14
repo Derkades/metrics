@@ -51,39 +51,57 @@ def show():
     if source not in configs:
         return Response('Invalid source', 400)
 
-    response = "<h2>Viewing metrics for " + html.escape(source) + "</h2>"
+    conf_show = configs[source]['show']
+
+    response = "<h2>" + html.escape(conf_show['title']) + "</h2>"
 
     cur = db.cursor()
+
     cur.execute('SELECT COUNT(*) FROM clients WHERE source=?', (source,))
     (count_clients,) = cur.fetchone()
+    response += f'Total active clients: {count_clients}'
 
-    response += f'Total active: {count_clients}'
+    for item in conf_show['items']:
+        field = item['field']
+        title = item['title']
+        item_type = item['type']
 
-    cur.execute('''
-                SELECT metric_name, metric_value, COUNT(*) as value_count
-                FROM metrics
-                    JOIN clients ON metrics.client_id = clients.rowid
-                WHERE clients.source=?
-                GROUP BY metric_name, metric_value
-                ORDER BY metric_name ASC, value_count DESC
-                ''', (source,))
+        response += "<h3>" + html.escape(metric_name) + "</h3>"
 
-    by_metric = {}
+        if item_type == 'breakdown':
+            response += "<ol>"
+            cur.execute('''
+                        SELECT metric_value, COUNT(*) AS value_count
+                        FROM metrics
+                            JOIN clients ON metrics.client_id = clients.id
+                        WHERE clients.source = ? AND metric_name = ?
+                        GROUP BY metric_value
+                        ORDER BY value_count DESC
+                        ''')
 
-    for metric_name, metric_value, count in cur.fetchall():
-        if metric_name in by_metric:
-            by_metric[metric_name].append((metric_value, count))
+            values = cur.fetchall()
+            total_count = sum(value[1] for value in values)
+            for metric_value, count in values:
+                perc = (count / total_count) * 100
+                response += f"<li>{html.escape(metric_value)} ({count} times, {perc:.1f}%)</li>"
+            response += "</ol>"
+        elif item_type == 'summary':
+            cur.execute('''
+                        SELECT SUM(metric_value) AS value_sum, AVG(metric_value) value_mean
+                        FROM metrics
+                            JOIN clients ON metrics.client_id = clients.id
+                        WHERE clients.source = ? AND metric_name = ?
+                        ''')
+            (value_sum, value_mean) = cur.fetchone()
+            response += '<p>'
+            response += f'Sum: {value_sum}<br>'
+            response += f'Mean: {value_mean}'
+            # TODO Also report median
+            response += '</p>'
         else:
-            by_metric[metric_name] = [(metric_value, count)]
+            raise ValueError('Invalid type: ' + str(item_type))
 
     cur.close()
-
-    for metric_name, values in by_metric.items():
-        response += "<h3>" + html.escape(metric_name) + "</h3>"
-        response += "<ol>"
-        for metric_value, count in values:
-            response += f"<li>{html.escape(metric_value)} ({count})</li>"
-        response += "</ol>"
 
     return response
 
