@@ -13,6 +13,7 @@ import sys
 import traceback
 from threading import Thread
 import time
+import re
 
 
 DATA_PATH = Path(env['DATA_PATH'] if 'DATA_PATH' in env else '.')
@@ -62,11 +63,11 @@ def show():
     response += f'Total active clients: {count_clients}'
 
     for item in conf_show['items']:
-        field = item['field']
-        title = item['title']
-        item_type = item['type']
+        field: str = item['field']
+        title: str = item['title']
+        item_type: str = item['type'] if 'type' in item else 'breakdown'
 
-        response += "<h3>" + html.escape(metric_name) + "</h3>"
+        response += "<h3>" + html.escape(title) + "</h3>"
 
         if item_type == 'breakdown':
             response += "<ol>"
@@ -77,13 +78,50 @@ def show():
                         WHERE clients.source = ? AND metric_name = ?
                         GROUP BY metric_value
                         ORDER BY value_count DESC
-                        ''')
+                        ''', (source, field))
 
-            values = cur.fetchall()
-            total_count = sum(value[1] for value in values)
-            for metric_value, count in values:
-                perc = (count / total_count) * 100
-                response += f"<li>{html.escape(metric_value)} ({count} times, {perc:.1f}%)</li>"
+            values: dict[str, str] = {}
+            for value, count in cur.fetchall():
+                if 'transform' in item:
+                    for transform in item['transform']:
+                        if transform['type'] == 'map':
+                            for map_from, map_to in transform['map'].items():
+                                if value == map_from:
+                                    value = map_to
+                        elif transform['type'] == 'regex':
+                            groups = re.findall(transform['pattern'], value)
+                            if len(groups) >= 1:
+                                matches = groups[0]
+                                for match in matches:
+                                    if isinstance(match, str) and match != '':
+                                        value = match
+                                        break
+                                else:
+                                    value = None
+                            else:
+                                value = None
+                        else:
+                            raise ValueError('Invalid transform type:' + str(transform['type']))
+
+                if value is not None:
+                    if value in values:
+                        values[value] += count
+                    else:
+                        values[value] = count
+
+            if len(values) >= 1:
+                total_count = sum(value for value in values.values())
+                for i, (metric_value, count) in enumerate(values.items()):
+                    if 'limit' in item and i >= int(item['limit']):
+                        skipped = len(values) - int(item['limit'])
+                        response += f'<li>...{skipped} more</li>'
+                        break
+
+                    perc = (count / total_count) * 100
+                    response += f"<li>{html.escape(metric_value)} ({count} times, {perc:.1f}%)</li>"
+            else:
+                response += "<em>No data</em>"
+
             response += "</ol>"
         elif item_type == 'summary':
             cur.execute('''
