@@ -1,0 +1,41 @@
+{% extends 'base.jinja' %}
+
+{% block content %}
+    <h2>{{ title }}</h2>
+    <p>Total active clients: {{ count_clients }}</p>
+    {% for item in items %}
+        <h3>{{ item['title'] }}</h3>
+        {% if item['type'] == 'breakdown' %}
+            {% if item['values'] %}
+                <div class="bar">
+                    {% for bar in item['bars'] %}
+                        <div class="bar-component" style="width: {{ bar['width']}}%; background-color: #{{ bar['color'] }}">{{ bar['index'] }}</div>
+                    {% endfor %}
+
+                    <div class="bar-component bar-other" style="background-color: #{{ item['bar_other_color'] }}"></div>
+                </div>
+                <br>
+                <ol>
+                {% for value in item['values'] %}
+                    <li>
+                    {% if 'color' in value %}<span style="background-color: #{{ value['color'] }}">{% endif %}
+                        {{ value['value'] }} ({{ value['count']}} times, {{ value['perc']}}%)
+                    {% if 'color' in value %}</span>{% endif %}
+                    </li>
+                {% endfor %}
+                </ol>
+            {% else %}
+                <p>No data</p>
+            {% endif %}
+        {% elif item['type'] == 'summary' %}
+            {% if item['sum'] %}
+            <p>
+                Sum: {{ item['sum'] }}<br>
+                Mean: {{ item['mean'] }}
+            </p>
+            {% else %}
+                <p>No data</p>
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+{% endblock %}

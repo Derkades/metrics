@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+.bar {
+    width: min(calc(100vw - 2*8px - 2px), 600px);
+    display: flex;
+    border: 1px solid black;
+}
+
+.bar .bar-component {
+    float: left;
+    text-align: center;
+    padding: 4px 0;
+}
+
+.bar .bar-other {
+    flex-grow: 1
+}
+
+body {
+    margin: 8px;
+}
+</style>
+</head>
+<body>
+<section class="content">
+    {% block content %}{% endblock %}
+</section>
+</body>
+</html>

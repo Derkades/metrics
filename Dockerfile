@@ -13,6 +13,7 @@ RUN echo "deb http://ftp.de.debian.org/debian bookworm main" >> /etc/apt/sources
 COPY docker/entrypoint.sh /
 
 COPY create_database.py server.py /app/
+COPY templates/ app/templates/
 
 WORKDIR /app
 

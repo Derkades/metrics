@@ -14,6 +14,7 @@ show:
             'False': 'Not working'
     - field: users
       type: summary
+      title: 'Number of users'
 
 input:
   frequency_minutes: 15

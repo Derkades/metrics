@@ -1,23 +1,25 @@
-import json
 from pathlib import Path
 import yaml
-from flask import Flask
-from flask import request, Response
 import sqlite3
 from datetime import datetime, timedelta
 from uuid import UUID
-import html
 from os import environ as env
-from werkzeug.exceptions import HTTPException
 import sys
 import traceback
 from threading import Thread
 import time
 import re
+import math
+
+from flask import Flask, request, render_template, Response
+from werkzeug.exceptions import HTTPException
 
 
 DATA_PATH = Path(env['DATA_PATH'] if 'DATA_PATH' in env else '.')
 CONFIG_PATH = Path(env['CONFIG_PATH'] if 'CONFIG_PATH' in env else '.')
+
+BAR_COLOR_MAIN = ['4f90c9', 'fad98c', 'ed6484', '7ef2d4', 'ba7ef2', 'e09472', 'e079ad']
+BAR_COLOR_OTHER = '777'
 
 
 def open_db():
@@ -54,23 +56,30 @@ def show():
 
     conf_show = configs[source]['show']
 
-    response = "<h2>" + html.escape(conf_show['title']) + "</h2>"
-
     cur = db.cursor()
 
     cur.execute('SELECT COUNT(*) FROM clients WHERE source=?', (source,))
     (count_clients,) = cur.fetchone()
-    response += f'Total active clients: {count_clients}'
+
+    context_items = []
 
     for item in conf_show['items']:
         field: str = item['field']
         title: str = item['title']
         item_type: str = item['type'] if 'type' in item else 'breakdown'
 
-        response += "<h3>" + html.escape(title) + "</h3>"
+        context_item = {}
+        context_item['title'] = title
+        context_item['type'] = item_type
+        context_items.append(context_item)
 
         if item_type == 'breakdown':
-            response += "<ol>"
+            context_item_values = []
+            context_item_bars = []
+            context_item['values'] = context_item_values
+            context_item['bars'] = context_item_bars
+            context_item['bar_other_color'] = BAR_COLOR_OTHER
+
             cur.execute('''
                         SELECT metric_value, COUNT(*) AS value_count
                         FROM metrics
@@ -114,38 +123,41 @@ def show():
                 for i, (metric_value, count) in enumerate(values.items()):
                     if 'limit' in item and i >= int(item['limit']):
                         skipped = len(values) - int(item['limit'])
-                        response += f'<li>...{skipped} more</li>'
+                        context_item['skipped'] = skipped
                         break
 
                     perc = (count / total_count) * 100
-                    response += f"<li>{html.escape(metric_value)} ({count} times, {perc:.1f}%)</li>"
+                    context_item_value = {'value': metric_value, 'count': count, 'perc': f'{perc:.1f}'}
+                    context_item_values.append(context_item_value)
+                    if i < len(BAR_COLOR_MAIN) and perc > 1.5:
+                        context_item_value['color'] = BAR_COLOR_MAIN[i]
+                        context_item_bars.append({'width': math.floor(perc * 100) / 100, 'color': BAR_COLOR_MAIN[i], 'index': i + 1})
             else:
-                response += "<em>No data</em>"
+                pass
 
-            response += "</ol>"
         elif item_type == 'summary':
             cur.execute('''
                         SELECT SUM(metric_value) AS value_sum, AVG(metric_value) value_mean
                         FROM metrics
                             JOIN clients ON metrics.client_id = clients.id
                         WHERE clients.source = ? AND metric_name = ?
-                        ''')
+                        ''',
+                        (source, field))
             (value_sum, value_mean) = cur.fetchone()
-            response += '<p>'
-            response += f'Sum: {value_sum}<br>'
-            response += f'Mean: {value_mean}'
-            # TODO Also report median
-            response += '</p>'
+            context_item['sum'] = value_sum
+            context_item['mean'] = value_mean
         else:
             raise ValueError('Invalid type: ' + str(item_type))
 
     cur.close()
 
-    return response
+    return render_template('view-metrics.jinja',
+                           title=conf_show['title'],
+                           count_clients=count_clients,
+                           items=context_items)
 
 
 @application.route('/submit', methods=['POST'])
-# @compress.compressed()
 def submit():
     if 'source' not in request.json:
         return Response('Missing source', 400)

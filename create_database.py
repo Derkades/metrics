@@ -15,7 +15,7 @@ if __name__ == '__main__':
                     id INTEGER PRIMARY KEY,
                     source TEXT NOT NULL,
                     uuid TEXT NOT NULL,
-                    last_update TIMESTAMP NOT NULL,
+                    last_update INTEGER NOT NULL,
                     UNIQUE(source, uuid)
                 ) STRICT
                 ''')
