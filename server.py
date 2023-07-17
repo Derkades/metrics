@@ -157,6 +157,11 @@ def show():
                            items=context_items)
 
 
+def bad_response(message):
+    print(message)
+    return Response(message, 400)
+
+
 @application.route('/submit', methods=['POST'])
 def submit():
     if 'source' not in request.json:
@@ -194,7 +199,8 @@ def submit():
                 field_values[name] = field['null_value']
                 continue
             else:
-                return Response(f"Missing field '{name}'", 400)
+                print('Missing field:', name)
+                return bad_response(f"Missing field '{name}'")
 
         value = request.json['fields'][name]
 
@@ -206,25 +212,26 @@ def submit():
                 field_values[name] = field['null_value']
                 continue
             else:
-                return Response(f"Field '{name}' is not nullable but null was given")
+                return bad_response(f"Field '{name}' is not nullable but null was given")
 
         correct_type = field['type']
         if correct_type == 'string':
             if not isinstance(value, str):
-                return Response(f"Field '{name}' must be a string", 400)
+                return bad_response(f"Field '{name}' must be a string")
 
             if 'allow_only' in field and value not in field['allow_only']:
-                return Response(f"Field value '{value}' not allowed for field '{name}'.", 400)
+                print('Received not allowed value :', name)
+                return bad_response(f"Field value '{value}' not allowed for field '{name}'.")
 
             field_values[name] = value
         elif correct_type == 'boolean':
             if not isinstance(value, bool):
-                return Response(f"Field '{name}' must be a boolean", 400)
+                return bad_response(f"Field '{name}' must be a boolean")
 
             field_values[name] = str(value)
         elif correct_type == 'integer':
             if not isinstance(value, int):
-                return Response(f"Field '{name}' must be an integer", 400)
+                return bad_response(f"Field '{name}' must be an integer")
 
             field_values[name] = str(value)
         else:
